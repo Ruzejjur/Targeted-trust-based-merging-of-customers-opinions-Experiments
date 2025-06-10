@@ -138,7 +138,7 @@ def compute_primary_modeler_posterior_brands(primary_modeler_weights, primary_mo
     # Calculate the product of maximum probabilities across all features
     max_probabilities_in_preference_matrix_product = np.prod(max_probabilities_in_preference_matrix, axis=0)
     
-    # Update the posterior probabilities for brands
+    # Update the posterior probabilities for brands by primary modellers brand preference
     primary_modeler_posterior_brands = max_probabilities_in_preference_matrix_product * primary_modeler_brand_pref
     
     # Normalize the posterior probabilities to sum to 1
@@ -180,10 +180,8 @@ def simulated_example(primary_modeler_scores, opinion_certainty_array, apply_cer
     else:
         # Ensure that the opinion certainty array is ones (equivalent to no certainty being applied)
         opinion_certainty_array = np.ones_like(opinion_certainty_array, dtype=np.float16)
-
-    # Generate primary modeler's weights
-    primary_modeler_weights = generate_primary_modeler_weights(primary_modeler_scores, opinion_certainty_array, score_range, initial_feature_weight)
-
+        
+    
     # Generate expert opinion weights for Samsung experts
     # ! Note 1: Ensure data type is float to correctly apply trust
     samsung_expert_opinion_weights = generate_expert_weights(samsung_expert_opinions, score_range, 0)
@@ -195,7 +193,7 @@ def simulated_example(primary_modeler_scores, opinion_certainty_array, apply_cer
     # Generate expert opinion weights for Xiaomi experts
     # ! Note 1: Ensure data type is float to correctly apply trust
     xiaomi_expert_opinion_weights = generate_expert_weights(xiaomi_expert_opinions, score_range, 0)
-
+    
     ## * Apply trust matrix to expert opinion weights for Samsung
 
     # Create an array of expert indices for Samsung
@@ -229,7 +227,6 @@ def simulated_example(primary_modeler_scores, opinion_certainty_array, apply_cer
     # * trust_matrix[2, i_indices] selects the trust values for Xiaomi experts
     # * This applies the trust factor to each expert's weights
     xiaomi_expert_opinion_weights_trust = xiaomi_expert_opinion_weights[:, :, i_indices] * trust_matrix[2, i_indices]
-
     
     ## Initialize cumulative expert weights
     # * Creating a 3D array to hold the cumulative weights for each brand and feature
@@ -254,12 +251,40 @@ def simulated_example(primary_modeler_scores, opinion_certainty_array, apply_cer
     # * Note 1: Axis 2 represents summing over all experts for each feature and score.
     cumulative_expert_weights[:, :, 2] = np.sum(xiaomi_expert_opinion_weights_trust, axis=2)
 
+    ## Calculating trust and certainty weighting linear opinion pooling
+    
+    
+    
+    # Generate primary modeler's weights witj initial feature weight 0, because this weight matrix represents pure opinion
+    primary_modeler_weights_linear_pool = generate_primary_modeler_weights(primary_modeler_scores, opinion_certainty_array, score_range, initial_feature_weight=0)
+
+    # Add the certainty weight of primary modeler to the trust weights for each brand
+    trust_and_opinion_certainty_weight_matrix = np.concatenate([opinion_certainty_array[:,np.newaxis], trust_matrix], axis=1)
+    
+    # Calculated weighted sum of expert opinions and primary modeller opinion
+    #* Note 1: Weights for experts = trust_matrix
+    #* Note 2: Weights for primary modeller = opinion_certainty
+    
+    trust_and_opinion_certainty_weight_matrix_sum = np.sum(trust_and_opinion_certainty_weight_matrix, axis=1)
+
+    # Mix primary modeler's weights with cumulative expert weights
+    linear_opinion_pool_weights = cumulative_expert_weights + primary_modeler_weights_linear_pool
+    
+    # Calculate linear opinion pool of expert weights and primary modellers weights
+    
+    linear_opinion_pool = linear_opinion_pool_weights/trust_and_opinion_certainty_weight_matrix_sum
+    
+    
+    ## Calculating FPD merging of opinions 
+    
+    # Generate primary modeler's weights
+    primary_modeler_weights_FPD = generate_primary_modeler_weights(primary_modeler_scores, opinion_certainty_array, score_range, initial_feature_weight)
 
     # Update primary modeler's weights with cumulative expert weights
-    primary_modeler_updated_weights = cumulative_expert_weights + primary_modeler_weights
+    primary_modeler_updated_weights = cumulative_expert_weights + primary_modeler_weights_FPD
 
     # Compute initial posterior probabilities for the primary modeler
-    _, primary_modeler_posterior_initial = compute_primary_modeler_posterior_brands(primary_modeler_weights, primary_modeler_brand_pref, primary_modeler_score_preference)
+    #_, primary_modeler_posterior_initial = compute_primary_modeler_posterior_brands(primary_modeler_weights_FPD, primary_modeler_brand_pref, primary_modeler_score_preference)
     
     # Compute updated posterior probabilities for the primary modeler
     _, primary_modeler_posterior_updated = compute_primary_modeler_posterior_brands(primary_modeler_updated_weights, primary_modeler_brand_pref, primary_modeler_score_preference)
