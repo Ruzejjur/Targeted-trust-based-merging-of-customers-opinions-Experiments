@@ -71,32 +71,22 @@ def generate_expert_weights(expert_scores, score_range, initial_feature_weight):
     return weight_table
 
 
-def compute_primary_modeler_posterior_brands(primary_modeler_weights, primary_modeler_brand_pref, primary_modeler_score_preference):
+def compute_primary_modeler_posterior_brands(primary_modeler_opinion_features, primary_modeler_brand_pref, primary_modeler_score_preference):
     """
     Computes the primary modeler's posterior probabilities for brands based on primary modeler's scores in form of weights, brand preferences, and score preferences.
 
     Parameters:
-    primary_modeler_weights (np.ndarray): Weights for each feature, score, and brand.
+    primary_modeler_opinion_features (np.ndarray): Normalized vector of primary modelers weights. Representing opinion about features.
     primary_modeler_brand_pref (np.ndarray): Distribution representing primary modeler's brand preference.
     primary_modeler_score_preference (np.ndarray): Primary modeler's score preference for each feature.
 
     Returns:
     tuple: A tuple containing:
-        - primary_modeler_opinion_features (np.ndarray): Normalized opinion on features of each brand for the primary modeler.
         - primary_modeler_posterior_brands (np.ndarray): Posterior probabilities for each brand.
     """
 
     # Initialize posterior probabilities for brands as np.ndarray of ones
-    primary_modeler_posterior_brands = np.ones((primary_modeler_weights.shape[2],), dtype=np.float16)
-    
-    # Initialize opinion features for the primary modeler
-    primary_modeler_opinion_features = np.zeros_like(primary_modeler_weights, dtype=np.float16)
-
-    # Calculate the sum along the second dimension (axis=1) and keep the dimensions for broadcasting
-    sums = np.sum(primary_modeler_weights, axis=1, keepdims=True)
-
-    # Perform the division using broadcasting to normalize the weights
-    primary_modeler_opinion_features = primary_modeler_weights / sums
+    primary_modeler_posterior_brands = np.ones((primary_modeler_opinion_features.shape[2],), dtype=np.float16)
 
     ## * Filter scores based on preferences
     # * Testing for speed showed that vector implementation is slower than for loop, but might be faster with large datasets
@@ -144,7 +134,7 @@ def compute_primary_modeler_posterior_brands(primary_modeler_weights, primary_mo
     # Normalize the posterior probabilities to sum to 1
     primary_modeler_posterior_brands = primary_modeler_posterior_brands / np.sum(primary_modeler_posterior_brands)
     
-    return primary_modeler_opinion_features, primary_modeler_posterior_brands
+    return primary_modeler_posterior_brands
 
 
 
@@ -274,20 +264,39 @@ def simulated_example(primary_modeler_scores, opinion_certainty_array, apply_cer
     
     linear_opinion_pool = linear_opinion_pool_weights/trust_and_opinion_certainty_weight_matrix_sum
     
+    # Compute updated posterior probabilities for the primary modeler
+    primary_modeler_posterior_updated_lin_pool = compute_primary_modeler_posterior_brands(linear_opinion_pool, primary_modeler_brand_pref, primary_modeler_score_preference)
+    
     
     ## Calculating FPD merging of opinions 
     
     # Generate primary modeler's weights
     primary_modeler_weights_FPD = generate_primary_modeler_weights(primary_modeler_scores, opinion_certainty_array, score_range, initial_feature_weight)
+    
+    # Calculate primary modellers initial opinion on features
+    
+    # # Calculate the sum along the second dimension (axis=1) and keep the dimensions for broadcasting
+    # sums = np.sum(primary_modeler_weights_FPD, axis=1, keepdims=True)
 
+    # # Perform the division using broadcasting to normalize the weights
+    # primary_modeler_opinion_features_initial = primary_modeler_weights_FPD / sums
+    
+    # Calculate primary modellers updated opinion on features
+    
     # Update primary modeler's weights with cumulative expert weights
     primary_modeler_updated_weights = cumulative_expert_weights + primary_modeler_weights_FPD
+    
+    # Calculate the sum along the second dimension (axis=1) and keep the dimensions for broadcasting
+    sums = np.sum(primary_modeler_updated_weights, axis=1, keepdims=True)
 
+    # Perform the division using broadcasting to normalize the weights
+    primary_modeler_opinion_features_updated = primary_modeler_updated_weights / sums
+    
     # Compute initial posterior probabilities for the primary modeler
-    #_, primary_modeler_posterior_initial = compute_primary_modeler_posterior_brands(primary_modeler_weights_FPD, primary_modeler_brand_pref, primary_modeler_score_preference)
+    #primary_modeler_posterior_initial = compute_primary_modeler_posterior_brands(primary_modeler_opinion_features_initial, primary_modeler_brand_pref, primary_modeler_score_preference)
     
     # Compute updated posterior probabilities for the primary modeler
-    _, primary_modeler_posterior_updated = compute_primary_modeler_posterior_brands(primary_modeler_updated_weights, primary_modeler_brand_pref, primary_modeler_score_preference)
+    primary_modeler_posterior_updated_FPD = compute_primary_modeler_posterior_brands(primary_modeler_opinion_features_updated, primary_modeler_brand_pref, primary_modeler_score_preference)
 
-    return primary_modeler_posterior_initial, primary_modeler_posterior_updated
+    return primary_modeler_posterior_updated_lin_pool, primary_modeler_posterior_updated_FPD
 
