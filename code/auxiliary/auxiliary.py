@@ -140,7 +140,7 @@ def compute_primary_modeler_posterior_brands(primary_modeler_opinion_features, p
 
 def simulated_example(primary_modeler_scores, opinion_certainty_array, apply_certainty, number_of_responders,
                       trust_matrix, primary_modeler_score_preference, primary_modeler_brand_pref, score_range, initial_feature_weight, 
-                      samsung_expert_opinions, iphone_expert_opinions, xiaomi_expert_opinions):
+                      Brand_1_expert_opinions, Brand_2_expert_opinions, Brand_3_expert_opinions):
     """
     Simulates the primary modeler's posterior preferences by combining initial scores with expert opinions.
 
@@ -154,9 +154,9 @@ def simulated_example(primary_modeler_scores, opinion_certainty_array, apply_cer
     primary_modeler_brand_pref (np.ndarray): Distribution representing primary modeler's brand preference.
     score_range (int): Highest possible score for each feature.
     initial_feature_weight (float): Initial feature weight for the Dirichlet distribution.
-    samsung_expert_opinions (np.ndarray): Expert opinions for Samsung.
-    iphone_expert_opinions (np.ndarray): Expert opinions for iPhone.
-    xiaomi_expert_opinions (np.ndarray): Expert opinions for Xiaomi.
+    Brand_1_expert_opinions (np.ndarray): Expert opinions for Brand_1.
+    Brand_2_expert_opinions (np.ndarray): Expert opinions for Brand_2.
+    Brand_3_expert_opinions (np.ndarray): Expert opinions for Brand_3.
 
     Returns:
     tuple: A tuple containing:
@@ -172,78 +172,77 @@ def simulated_example(primary_modeler_scores, opinion_certainty_array, apply_cer
         opinion_certainty_array = np.ones_like(opinion_certainty_array, dtype=np.float16)
         
     
-    # Generate expert opinion weights for Samsung experts
+    # Generate expert opinion weights for Brand_1 experts
     # ! Note 1: Ensure data type is float to correctly apply trust
-    samsung_expert_opinion_weights = generate_expert_weights(samsung_expert_opinions, score_range, 0)
+    Brand_1_expert_opinion_weights = generate_expert_weights(Brand_1_expert_opinions, score_range, 0)
 
-    # Generate expert opinion weights for iPhone experts
+    # Generate expert opinion weights for Brand_2 experts
     # ! Note 1: Ensure data type is float to correctly apply trust
-    iphone_expert_opinion_weights = generate_expert_weights(iphone_expert_opinions, score_range, 0)
+    Brand_2_expert_opinion_weights = generate_expert_weights(Brand_2_expert_opinions, score_range, 0)
                 
-    # Generate expert opinion weights for Xiaomi experts
+    # Generate expert opinion weights for Brand_3 experts
     # ! Note 1: Ensure data type is float to correctly apply trust
-    xiaomi_expert_opinion_weights = generate_expert_weights(xiaomi_expert_opinions, score_range, 0)
+    Brand_3_expert_opinion_weights = generate_expert_weights(Brand_3_expert_opinions, score_range, 0)
     
-    ## * Apply trust matrix to expert opinion weights for Samsung
+    ## * Apply trust matrix to expert opinion weights for Brand_1
 
-    # Create an array of expert indices for Samsung
+    # Create an array of expert indices for Brand_1
     # This is essentially a range of numbers from 0 to the number of experts - 1
-    i_indices = np.arange(samsung_expert_opinion_weights.shape[2], dtype=np.int32)
+    i_indices = np.arange(Brand_1_expert_opinion_weights.shape[2], dtype=np.int32)
 
-    # Multiply the expert opinion weights by the corresponding trust values for Samsung
-    # * Note 1: samsung_expert_opinion_weights is a 3D array where the third dimension represents different experts
-    # * trust_matrix[0, i_indices] selects the trust values for Samsung experts
+    # Multiply the expert opinion weights by the corresponding trust values for Brand_1
+    # * Note 1: Brand_1_expert_opinion_weights is a 3D array where the third dimension represents different experts
+    # * trust_matrix[0, i_indices] selects the trust values for Brand_1 experts
     # * This applies the trust factor to each expert's weights
-    samsung_expert_opinion_weights_trust = samsung_expert_opinion_weights[:, :, i_indices] * trust_matrix[0, i_indices]
+    Brand_1_expert_opinion_weights_trust = Brand_1_expert_opinion_weights[:, :, i_indices] * trust_matrix[0, i_indices]
 
-    ## * Apply trust matrix to expert opinion weights for iPhone
+    ## * Apply trust matrix to expert opinion weights for Brand_2
 
-    # Create an array of expert indices for iPhone
-    i_indices = np.arange(iphone_expert_opinion_weights.shape[2], dtype=np.int32)
+    # Create an array of expert indices for Brand_2
+    i_indices = np.arange(Brand_2_expert_opinion_weights.shape[2], dtype=np.int32)
 
-    # Multiply the expert opinion weights by the corresponding trust values for iPhone
-    # * Note 1: iphone_expert_opinion_weights is a 3D array where the third dimension represents different experts
-    # * trust_matrix[1, i_indices] selects the trust values for iPhone experts
+    # Multiply the expert opinion weights by the corresponding trust values for Brand_2
+    # * Note 1: Brand_2_expert_opinion_weights is a 3D array where the third dimension represents different experts
+    # * trust_matrix[1, i_indices] selects the trust values for Brand_2 experts
     # * This applies the trust factor to each expert's weights
-    iphone_expert_opinion_weights_trust = iphone_expert_opinion_weights[:, :, i_indices] * trust_matrix[1, i_indices]
+    Brand_2_expert_opinion_weights_trust = Brand_2_expert_opinion_weights[:, :, i_indices] * trust_matrix[1, i_indices]
 
-    ## * Apply trust matrix to expert opinion weights for Xiaomi
+    ## * Apply trust matrix to expert opinion weights for Brand_3
 
-    # Create an array of expert indices for Xiaomi
-    i_indices = np.arange(xiaomi_expert_opinion_weights.shape[2], dtype=np.int32)
+    # Create an array of expert indices for Brand_3
+    i_indices = np.arange(Brand_3_expert_opinion_weights.shape[2], dtype=np.int32)
 
-    # Multiply the expert opinion weights by the corresponding trust values for Xiaomi
-    # * Note 1: xiaomi_expert_opinion_weights is a 3D array where the third dimension represents different experts
-    # * trust_matrix[2, i_indices] selects the trust values for Xiaomi experts
+    # Multiply the expert opinion weights by the corresponding trust values for Brand_3
+    # * Note 1: Brand_3_expert_opinion_weights is a 3D array where the third dimension represents different experts
+    # * trust_matrix[2, i_indices] selects the trust values for Brand_3 experts
     # * This applies the trust factor to each expert's weights
-    xiaomi_expert_opinion_weights_trust = xiaomi_expert_opinion_weights[:, :, i_indices] * trust_matrix[2, i_indices]
+    Brand_3_expert_opinion_weights_trust = Brand_3_expert_opinion_weights[:, :, i_indices] * trust_matrix[2, i_indices]
     
     ## Initialize cumulative expert weights
     # * Creating a 3D array to hold the cumulative weights for each brand and feature
     # * Shape: (`number of features`, score_range, `number of brands`)
     # * - The first dimension represents the features.
     # * - The second dimension (score_range) represents the possible scores for each feature.
-    # * - The third dimension represents the brands: Samsung, iPhone, and Xiaomi.
+    # * - The third dimension represents the brands: Brand_1, Brand_2, and Brand_3.
     cumulative_expert_weights = np.zeros((3, score_range, 3), dtype=np.float32)
 
-    # Summing the trusted expert opinion weights for Samsung across all experts
+    # Summing the trusted expert opinion weights for Brand_1 across all experts
     # and storing the result in the first slice of the cumulative weights array.
     # * Note 1: Axis 2 represents summing over all experts for each feature and score.
-    cumulative_expert_weights[:, :, 0] = np.sum(samsung_expert_opinion_weights_trust, axis=2)
+    cumulative_expert_weights[:, :, 0] = np.sum(Brand_1_expert_opinion_weights_trust, axis=2)
 
-    # Summing the trusted expert opinion weights for iPhone across all experts
+    # Summing the trusted expert opinion weights for Brand_2 across all experts
     # and storing the result in the second slice of the cumulative weights array.
     # * Note 1: Axis 2 represents summing over all experts for each feature and score.
-    cumulative_expert_weights[:, :, 1] = np.sum(iphone_expert_opinion_weights_trust, axis=2)
+    cumulative_expert_weights[:, :, 1] = np.sum(Brand_2_expert_opinion_weights_trust, axis=2)
 
-    # Summing the trusted expert opinion weights for Xiaomi across all experts
+    # Summing the trusted expert opinion weights for Brand_3 across all experts
     # and storing the result in the third slice of the cumulative weights array.
     # * Note 1: Axis 2 represents summing over all experts for each feature and score.
-    cumulative_expert_weights[:, :, 2] = np.sum(xiaomi_expert_opinion_weights_trust, axis=2)
+    cumulative_expert_weights[:, :, 2] = np.sum(Brand_3_expert_opinion_weights_trust, axis=2)
+
 
     ## Calculating trust and certainty weighting linear opinion pooling
-    
-    
     
     # Generate primary modeler's weights witj initial feature weight 0, because this weight matrix represents pure opinion
     primary_modeler_weights_linear_pool = generate_primary_modeler_weights(primary_modeler_scores, opinion_certainty_array, score_range, initial_feature_weight=0)
