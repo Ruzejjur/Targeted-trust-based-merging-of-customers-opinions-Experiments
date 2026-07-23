@@ -4,7 +4,7 @@ def test_resulting_posterior(output_array, test_array, delta=1e-10):
     """
     Compares two numpy arrays for equality within a certain tolerance.
 
-    Parameters:
+    # Parameters: 
     output_array (np.ndarray): The first array to compare.
     test_array (np.ndarray): The second array to compare.
     delta (float, optional): The maximum allowed difference for the comparison. Default is 1e-10.

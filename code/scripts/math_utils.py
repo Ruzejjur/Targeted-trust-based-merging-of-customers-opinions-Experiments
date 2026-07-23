@@ -1,5 +1,169 @@
 import numpy as np
+import pandas as pd
+from statsmodels.stats.correlation_tools import corr_nearest
+from scipy.stats import norm, beta
+from scipy.spatial.distance import mahalanobis
 import time
+
+
+# Correlation matrix object
+class CorrelationMatrix: 
+    """
+    #TODO: Add description
+    """
+
+    def __init__(self, data):
+        # Calculate Kendall's Tau-b for all columns of the data
+        self.correlation_matrix = data.corr(method='kendall', numeric_only=True)
+
+        self.pearson_correlation_matrix = self._greiner_relation(self.correlation_matrix)
+        # Ensure the matrix is positive semi-definite
+        self.pearson_correlation_matrix = corr_nearest(self.pearson_correlation_matrix)
+
+    def _greiner_relation(self, correlation_matrix: pd.DataFrame) -> np.ndarray:
+        """
+        Applies Greiner's relation to transform Kendall's Tau-b to Persons correlation coefficient.
+        #TODO: Finish the description
+        Parameters: 
+
+        Returns: 
+        
+        """
+        pearson_correlation_matrix = correlation_matrix.map(lambda x: np.sin((np.pi/2)*x))
+        pearson_correlation_matrix = pearson_correlation_matrix.to_numpy()
+
+        return pearson_correlation_matrix
+
+
+# Trust calculation
+def normalise_score(score:np.integer, score_range:np.integer)->np.float64: 
+    """
+    #TODO: Add description
+    """
+    normlised_score = np.float64((score-0.5)/score_range)
+
+    return normlised_score
+
+
+def calculate_z_scores(normalised_scores:np.ndarray)->np.ndarray:
+    """
+    #TODO: Add description
+    """
+
+    z_scores = norm.ppf(normalised_scores)
+
+    return z_scores
+
+def mahalanobis_distance(z_scores:np.ndarray, pearson_correlation_matrix:pd.DataFrame)-> np.float64:
+    """
+    #TODO: Add description
+    """
+
+    inverse_corr_matrix = np.linalg.inv(pearson_correlation_matrix)
+
+    mahalanobis_distance = mahalanobis(z_scores, np.zeros(z_scores.shape), inverse_corr_matrix)
+
+    return mahalanobis_distance
+
+
+def trust_weight(distance:np.float64)->np.float64: 
+    """
+    #TODO: Add description
+    """
+
+    trust_weight = np.exp(-(1/2)*distance)
+
+    return trust_weight
+
+# Projecting marginal scores to distributions
+
+def parametrise_beta_dist(normalised_score: np.float64, certainty:np.float64) -> tuple[np.float64, np.float64]:
+    """
+    #TODO: Add description
+    """
+
+    alpha = 1+2*normalised_score*(certainty/(1-certainty))
+    beta = 1+2*(1-normalised_score)*(certainty/(1-certainty))
+
+    return alpha, beta
+
+def v_max(score_range: np.integer, sigma_multiplier: np.float64) -> np.float64:
+    """
+    #TODO: Add description
+    """
+    # Calculating mid value of the score and flooring. 
+    # Note: For the given beta distribution parametrisation the variance is the worst 
+    #       for the midlle score, so we create an upper estimate for the variance
+    mid_score_val = 0.5
+    if score_range % 2 == 0:
+        mid_score_val = 0.45
+
+    #TODO: Find intuitive explanation for v_max
+    v_max = (mid_score_val*(1-mid_score_val))*(2*score_range*sigma_multiplier)**2 - 1
+
+    return v_max
+
+def maximum_certainty(v_max: np.float64) -> np.float64:
+    """
+    #TODO: Add description
+    """
+
+    max_c = 1 - 2/v_max
+
+    return max_c
+
+class MarginalOpinion: 
+    """
+    #TODO: Add description
+    """
+
+    def __init__(self, score, certainty, score_range, sigma_multiplier): 
+        self.score = score
+        self.certainty = certainty
+        self.score_range = score_range
+        self.sigma_multiplier = sigma_multiplier
+
+        self.alpha, self.beta = parametrise_beta_dist(self.score, self.certainty)
+        self.v_max = v_max(self.score_range, self.sigma_multiplier)
+        self.max_c = maximum_certainty(self.v_max)
+        self.normlised_score = normalise_score(self.score, self.score_range)
+
+    def _discrete_marginal_opinion(self, score_range: np.integer) -> np.ndarray:
+        """
+        #TODO: Add description
+        """
+
+        bin_edge_quantiles = np.array([beta.ppf(k/score_range, self.alpha, self.beta)] for k in range(1,score_range+1))
+
+        discrete_distr = bin_edge_quantiles[:-1] - bin_edge_quantiles[1:]
+
+        return discrete_distr
+
+        #TODO: Wrong I need CDF values of all of the right edges for the copula
+
+
+    
+
+    
+
+# Marginal score distributions on features
+
+#TODO: Find better name for v_max
+def map_score_to_distribution(scores: np.ndarray, certainty_vec: np.ndarray, score_range: np.integer, v_max: np.integer):
+    """
+    #TODO: Add description
+    """
+    normalised_scores = np.frompyfunc(normalise_score, 2, 1)(scores, score_range)
+
+    parametrise_beta_dist(normalised_scores, certainty_vec, v_max)
+
+
+
+
+
+
+
+
 
 def generate_primary_modeler_weights(primary_modeler_scores, opinion_certainty_array, score_range, initial_feature_weight):
     """
