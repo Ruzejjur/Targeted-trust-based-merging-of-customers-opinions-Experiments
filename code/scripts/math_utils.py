@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
 from statsmodels.stats.correlation_tools import corr_nearest
-from scipy.stats import norm, beta
+from scipy.stats import norm, beta, multivariate_normal
 from scipy.spatial.distance import mahalanobis
-import time
+from itertools import product
+
+from typing import Iterator
 
 
 # Correlation matrix object
@@ -45,12 +47,12 @@ def normalise_score(score:np.integer, score_range:np.integer)->np.float64:
     return normlised_score
 
 
-def calculate_z_scores(normalised_scores:np.ndarray)->np.ndarray:
+def calculate_z_scores(arr:np.ndarray)->np.ndarray:
     """
     #TODO: Add description
     """
 
-    z_scores = norm.ppf(normalised_scores)
+    z_scores = norm.ppf(arr)
 
     return z_scores
 
@@ -117,29 +119,145 @@ class MarginalOpinion:
     #TODO: Add description
     """
 
-    def __init__(self, score, certainty, score_range, sigma_multiplier): 
+    def __init__(self, score:np.integer, certainty:np.float64, score_range:np.integer, sigma_multiplier:np.float64): 
         self.score = score
         self.certainty = certainty
         self.score_range = score_range
         self.sigma_multiplier = sigma_multiplier
 
-        self.alpha, self.beta = parametrise_beta_dist(self.score, self.certainty)
+        self.normlised_score = normalise_score(self.score, self.score_range)
+        self.alpha, self.beta = parametrise_beta_dist(self.normlised_score, self.certainty)
         self.v_max = v_max(self.score_range, self.sigma_multiplier)
         self.max_c = maximum_certainty(self.v_max)
-        self.normlised_score = normalise_score(self.score, self.score_range)
+        self.cdf_quantiles = self._discrete_CDF_in_edge_bins(self.score_range)
+        self.z_scores = calculate_z_scores(self.cdf_quantiles)
 
-    def _discrete_marginal_opinion(self, score_range: np.integer) -> np.ndarray:
+    def _discrete_CDF_in_edge_bins(self, score_range: np.integer) -> np.ndarray:
         """
         #TODO: Add description
         """
 
-        bin_edge_quantiles = np.array([beta.ppf(k/score_range, self.alpha, self.beta)] for k in range(1,score_range+1))
+        bin_edge_quantiles = np.array([beta.ppf(k/score_range, self.alpha, self.beta) for k in range(score_range+1)])
 
-        discrete_distr = bin_edge_quantiles[:-1] - bin_edge_quantiles[1:]
+        return bin_edge_quantiles
 
-        return discrete_distr
+# Copula modelling 
 
-        #TODO: Wrong I need CDF values of all of the right edges for the copula
+def gauss_copula_probab(scores: np.ndarray, certainties: np.ndarray, score_range: np.integer, sigma_multiplier: np.float64, correlation_matrix: np.ndarray) -> np.ndarray: 
+    """
+    #TODO: Add description
+    """
+
+    marginal_opinions = np.array([MarginalOpinion(score, certainty, score_range, sigma_multiplier) for score, certainty in zip(scores, certainties)])
+    
+    marginal_z_scores = np.array([marginal_opinion.z_scores for marginal_opinion in marginal_opinions])
+
+    z_upper = np.array([])
+    z_lower = np.array([])
+
+    for score, z_scores in zip(scores, marginal_z_scores): 
+
+        z_upper = np.append(z_upper, z_scores[score - 1])
+        z_lower = np.append(z_lower, z_scores[score + 1])
+
+    means = np.zeros(4) # The Copula latent space is centered at 0
+
+    # Instantiate a multivariate normal object
+    mvn_dist = multivariate_normal(mean=means, cov=correlation_matrix)
+
+    # Calculate the probability mass of the exact hyper-rectangle
+    # 'x' serves as the upper limit, 'lower_limit' creates the bounding box
+    prob = mvn_dist.cdf(x=z_upper, lower_limit=z_lower)
+
+    return prob
+
+# Posterior on phones
+
+def generate_acceptance_region(
+    feature_score_preference: np.ndarray, 
+    score_range: np.integer, 
+    number_of_features: np.integer,
+    tolerance_distance: np.integer
+) -> Iterator[np.ndarray]: 
+    """
+    Generates discrete state permutations that fall within the modeller's acceptance region.
+    Uses a Python generator to prevent memory overflow during multi-dimensional state space traversal.
+    
+    Parameters:
+    - feature_score_preference (np.ndarray): The target score vector (e.g., [8, 7, 9, 5]).
+    - score_range (int): The maximum score value (e.g., 10).
+    - number_of_features (int): The dimensionality of the state space (e.g., 4).
+    - tolerance_distance (float): How far a score can deviate from the preference and still be "accepted".
+    
+    Yields:
+    - np.ndarray: A single valid state vector that meets the acceptance criteria.
+    """
+    
+    # Possible discrete scores (e.g., 1 through 10)
+    # Note: np.arange(1, score_range) stops at score_range - 1. You must add +1.
+    possible_scores = np.arange(1, score_range + 1)
+    
+    # Iterate through the Cartesian product without casting to a list in memory
+    for state_tuple in product(possible_scores, repeat=number_of_features):
+        state_vector = np.array(state_tuple)
+        
+        # The state must be strictly greater than or equal to the 
+        # preference vector minus the allowed tolerance.
+        if np.all(state_vector >= (feature_score_preference - tolerance_distance)):
+            
+            # Yield hands the valid state back to your FPD loop one at a time, 
+            # keeping RAM usage essentially at zero.
+            yield state_vector
+
+    
+def calculate_global_brand_preference(global_brand_score:np.ndarray) -> np.ndarray:
+    """
+    #TODO: Add description
+    """
+
+    prob = global_brand_score/np.sum(global_brand_score)
+
+    return prob
+
+    
+
+def posterior_on_brands(feature_score_preference: np.ndarray,
+    global_brand_score:np.ndarray, 
+    num_of_brands: np.int64,    
+    score_range: np.integer, 
+    number_of_features: np.integer,
+    tolerance_distance: np.integer):
+    """
+    #TODO: Add description
+    """
+
+    global_brand_preference = calculate_global_brand_preference(global_brand_score)
+    feature_score_acceptance_region = generate_acceptance_region(feature_score_preference, number_of_features, score_range, tolerance_distance)
+
+    brand_posterior = np.zeros(num_of_brands)
+
+    # Assuming that the feature space is of shape (b,f1,f2, ..., fn)
+    #TODO: Make use of boolean mask in the original code. Here we only need to sum up specific rows in a smart way. 
+
+
+    
+
+
+    pass
+
+    
+
+
+
+        
+
+
+
+
+
+
+    
+
 
 
     
