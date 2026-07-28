@@ -38,11 +38,11 @@ class CorrelationMatrix:
 
 
 # Trust calculation
-def normalise_score(score:np.integer, score_range:np.integer)->np.float64: 
+def normalise_score(score:int, score_range:int)->float: 
     """
     #TODO: Add description
     """
-    normlised_score = np.float64((score-0.5)/score_range)
+    normlised_score = float((score-0.5)/score_range)
 
     return normlised_score
 
@@ -56,7 +56,7 @@ def calculate_z_scores(arr:np.ndarray)->np.ndarray:
 
     return z_scores
 
-def mahalanobis_distance(z_scores:np.ndarray, pearson_correlation_matrix:pd.DataFrame)-> np.float64:
+def compute_mahalanobis_distance(z_scores:np.ndarray, pearson_correlation_matrix:np.ndarray)-> float:
     """
     #TODO: Add description
     """
@@ -68,18 +68,31 @@ def mahalanobis_distance(z_scores:np.ndarray, pearson_correlation_matrix:pd.Data
     return mahalanobis_distance
 
 
-def trust_weight(distance:np.float64)->np.float64: 
+def compute_trust_weight(
+    scores: np.ndarray, 
+    score_range: int, 
+    pearson_correlation_matrix: np.ndarray
+) -> float: 
     """
     #TODO: Add description
     """
+    # Normalize correctly using score_range, not len(scores)
+    normalised_scores = np.array([normalise_score(score, score_range) for score in scores])
+    
+    # Pass the normalized probabilities to the Z-score function
+    z_scores = calculate_z_scores(normalised_scores)
+    
+    # Calculate distance
+    distance = compute_mahalanobis_distance(z_scores, pearson_correlation_matrix)
 
-    trust_weight = np.exp(-(1/2)*distance)
+    # Exponential decay for trust
+    trust_weight = np.exp(-0.5 * (distance ** 2)) # Note: Mahalanobis returns distance, we need distance^2 for the Gaussian kernel
 
-    return trust_weight
+    return float(trust_weight)
 
 # Projecting marginal scores to distributions
 
-def parametrise_beta_dist(normalised_score: np.float64, certainty:np.float64) -> tuple[np.float64, np.float64]:
+def parametrise_beta_dist(normalised_score: float, certainty:float) -> tuple[float, float]:
     """
     #TODO: Add description
     """
@@ -89,7 +102,7 @@ def parametrise_beta_dist(normalised_score: np.float64, certainty:np.float64) ->
 
     return alpha, beta
 
-def v_max(score_range: np.integer, sigma_multiplier: np.float64) -> np.float64:
+def v_max(score_range: int, sigma_multiplier: float) -> float:
     """
     #TODO: Add description
     """
@@ -105,7 +118,7 @@ def v_max(score_range: np.integer, sigma_multiplier: np.float64) -> np.float64:
 
     return v_max
 
-def maximum_certainty(v_max: np.float64) -> np.float64:
+def maximum_certainty(v_max: float) -> float:
     """
     #TODO: Add description
     """
@@ -114,102 +127,79 @@ def maximum_certainty(v_max: np.float64) -> np.float64:
 
     return max_c
 
-class MarginalOpinion: 
-    """
-    #TODO: Add description
-    """
-
-    def __init__(self, score:np.integer, certainty:np.float64, score_range:np.integer, sigma_multiplier:np.float64): 
-        self.score = score
-        self.certainty = certainty
-        self.score_range = score_range
-        self.sigma_multiplier = sigma_multiplier
-
-        self.normlised_score = normalise_score(self.score, self.score_range)
-        self.alpha, self.beta = parametrise_beta_dist(self.normlised_score, self.certainty)
-        self.v_max = v_max(self.score_range, self.sigma_multiplier)
-        self.max_c = maximum_certainty(self.v_max)
-        self.cdf_quantiles = self._discrete_CDF_in_edge_bins(self.score_range)
-        self.z_scores = calculate_z_scores(self.cdf_quantiles)
-
-    def _discrete_CDF_in_edge_bins(self, score_range: np.integer) -> np.ndarray:
-        """
-        #TODO: Add description
-        """
-
-        bin_edge_quantiles = np.array([beta.ppf(k/score_range, self.alpha, self.beta) for k in range(score_range+1)])
-
-        return bin_edge_quantiles
-
 # Copula modelling 
 
-def gauss_copula_probab(scores: np.ndarray, certainties: np.ndarray, score_range: np.integer, sigma_multiplier: np.float64, correlation_matrix: np.ndarray) -> np.ndarray: 
+def generate_copula_probability_tensor(
+    scores: np.ndarray, 
+    certainties: np.ndarray, 
+    score_range: int, 
+    sigma_multiplier: float, 
+    correlation_matrix: np.ndarray
+) -> np.ndarray:
     """
-    #TODO: Add description
+    Generates the full N-dimensional joint probability tensor for a given opinion 
+    using the Gaussian Copula over discrete score bins.
     """
-
-    marginal_opinions = np.array([MarginalOpinion(score, certainty, score_range, sigma_multiplier) for score, certainty in zip(scores, certainties)])
+    num_features = len(scores)
+    feature_z_bounds = []
     
-    marginal_z_scores = np.array([marginal_opinion.z_scores for marginal_opinion in marginal_opinions])
+    # Uniform bin edges (e.g., 0.0, 0.1 ... 1.0)
+    normalized_edges = np.linspace(0, 1, score_range + 1)
 
-    z_upper = np.array([])
-    z_lower = np.array([])
-
-    for score, z_scores in zip(scores, marginal_z_scores): 
-
-        z_upper = np.append(z_upper, z_scores[score - 1])
-        z_lower = np.append(z_lower, z_scores[score + 1])
-
-    means = np.zeros(4) # The Copula latent space is centered at 0
-
-    # Instantiate a multivariate normal object
-    mvn_dist = multivariate_normal(mean=means, cov=correlation_matrix)
-
-    # Calculate the probability mass of the exact hyper-rectangle
-    # 'x' serves as the upper limit, 'lower_limit' creates the bounding box
-    prob = mvn_dist.cdf(x=z_upper, lower_limit=z_lower)
-
-    return prob
-
-# Posterior on phones
-
-def generate_acceptance_region(
-    feature_score_preference: np.ndarray, 
-    score_range: np.integer, 
-    number_of_features: np.integer,
-    tolerance_distance: np.integer
-) -> Iterator[np.ndarray]: 
-    """
-    Generates discrete state permutations that fall within the modeller's acceptance region.
-    Uses a Python generator to prevent memory overflow during multi-dimensional state space traversal.
+    variance_cap = v_max(score_range, sigma_multiplier)
+    allowed_max_certainty = maximum_certainty(variance_cap)
     
-    Parameters:
-    - feature_score_preference (np.ndarray): The target score vector (e.g., [8, 7, 9, 5]).
-    - score_range (int): The maximum score value (e.g., 10).
-    - number_of_features (int): The dimensionality of the state space (e.g., 4).
-    - tolerance_distance (float): How far a score can deviate from the preference and still be "accepted".
-    
-    Yields:
-    - np.ndarray: A single valid state vector that meets the acceptance criteria.
-    """
-    
-    # Possible discrete scores (e.g., 1 through 10)
-    # Note: np.arange(1, score_range) stops at score_range - 1. You must add +1.
-    possible_scores = np.arange(1, score_range + 1)
-    
-    # Iterate through the Cartesian product without casting to a list in memory
-    for state_tuple in product(possible_scores, repeat=number_of_features):
-        state_vector = np.array(state_tuple)
+    # Map Marginal Opinions to Latent Z-Bounds
+    for score, certainty in zip(scores, certainties):
         
-        # The state must be strictly greater than or equal to the 
-        # preference vector minus the allowed tolerance.
-        if np.all(state_vector >= (feature_score_preference - tolerance_distance)):
-            
-            # Yield hands the valid state back to your FPD loop one at a time, 
-            # keeping RAM usage essentially at zero.
-            yield state_vector
+        # Parameterize the Beta distribution
+        norm_score = normalise_score(score, score_range) 
 
+        # Clamp the user's certainty so it does not exceed the mathematical limits
+        safe_certainty = min(certainty, allowed_max_certainty)
+
+        alpha_param, beta_param = parametrise_beta_dist(norm_score, certainty)
+        
+        # Calculate cumulative probability mass at each bin edge
+        cumulative_probs = beta.cdf(normalized_edges, alpha_param, beta_param)
+        
+        # Translate to Standard Normal Z-space
+        z_edges = norm.ppf(cumulative_probs)
+        
+        # Force absolute boundaries to catch tail probability mass
+        z_edges[0] = -np.inf
+        z_edges[-1] = np.inf
+        
+        feature_z_bounds.append(z_edges)
+        
+    # Extract 1D bounds for the meshgrid
+    lower_bounds_1d = [z[:-1] for z in feature_z_bounds]
+    upper_bounds_1d = [z[1:] for z in feature_z_bounds]
     
+    # Generate the N-Dimensional Grid
+    grid_lower = np.meshgrid(*lower_bounds_1d, indexing='ij')
+    grid_upper = np.meshgrid(*upper_bounds_1d, indexing='ij')
+    
+    # Flatten the grid into a list of bounding boxes
+    flat_lower = np.stack(grid_lower, axis=-1).reshape(-1, num_features)
+    flat_upper = np.stack(grid_upper, axis=-1).reshape(-1, num_features)
+    
+    # Evaluate the Copula
+    mvn_dist = multivariate_normal(mean=np.zeros(num_features), cov=correlation_matrix)
+    
+    prob_mass_flat = np.array([
+        mvn_dist.cdf(x=upper, lower_limit=lower)
+        for lower, upper in zip(flat_lower, flat_upper)
+    ])
+    
+    # Reshape back into the discrete N-Dimensional tensor
+    tensor_shape = tuple([score_range] * num_features)
+    P_copula_tensor = prob_mass_flat.reshape(tensor_shape)
+    
+    return P_copula_tensor
+
+# Prior initialisation
+
 def calculate_global_brand_preference(global_brand_score:np.ndarray) -> np.ndarray:
     """
     #TODO: Add description
@@ -219,31 +209,127 @@ def calculate_global_brand_preference(global_brand_score:np.ndarray) -> np.ndarr
 
     return prob
 
-    
 
-def posterior_on_brands(feature_score_preference: np.ndarray,
-    global_brand_score:np.ndarray, 
-    num_of_brands: np.int64,    
-    score_range: np.integer, 
-    number_of_features: np.integer,
-    tolerance_distance: np.integer):
+def initialize_fpd_prior(
+    modeller_scores: np.ndarray, 
+    modeller_certainties: np.ndarray, 
+    score_range: int, 
+    correlation_matrix: np.ndarray, 
+    N_max: float, 
+    global_certainty: float,
+    confidence_ratio: float,
+    sigma_multiplier: float
+) -> np.ndarray:
     """
+    Constructs the N-dimensional discrete prior tensor based on the primary modeller's 
+    subjective marginal opinions and the objective Gaussian Copula correlation.
+    
+    Parameters:
+    - modeller_scores (np.ndarray): The expected scores for each feature of each bramd (e.g., ["brand",8, 6, 7, 5]).
+    - modeller_certainties (np.ndarray): The confidence [0, 1) for each score (e.g., ["brand", 0.3]).
+    - score_range (int): The max score (e.g., 10).
+    - correlation_matrix (np.ndarray): The objective Sigma matrix (shape: N x N).
+    - global_certainty (float): .
+    """
+
+    maximum_achievable_certainty = (confidence_ratio)/(1-confidence_ratio)
+
+    K = ((1-maximum_achievable_certainty)/maximum_achievable_certainty)*N_max
+
+    global_certainty = K*(global_certainty/(1-global_certainty))
+
+    # Generate the Copula distribution for the Modeller
+    P_copula_tensor = generate_copula_probability_tensor(
+        scores=modeller_scores,
+        certainties=modeller_certainties,
+        score_range=score_range,
+        sigma_multiplier=sigma_multiplier,
+        correlation_matrix=correlation_matrix
+    )
+        
+    fpd_prior_tensor = 1.0 + (global_certainty * P_copula_tensor)
+    
+    return fpd_prior_tensor
+
+
+# Opinion update
+
+def apply_expert_update(
+    memory_tensor: np.ndarray,
+    expert_scores: np.ndarray, 
+    expert_certainties: np.ndarray, 
+    score_range: int, 
+    sigma_multiplier: float, 
+    correlation_matrix: np.ndarray
+) -> np.ndarray:
+    """
+    Executes the Bayesian update for an incoming expert opinion.
     #TODO: Add description
     """
-
-    global_brand_preference = calculate_global_brand_preference(global_brand_score)
-    feature_score_acceptance_region = generate_acceptance_region(feature_score_preference, number_of_features, score_range, tolerance_distance)
-
-    brand_posterior = np.zeros(num_of_brands)
-
-    # Assuming that the feature space is of shape (b,f1,f2, ..., fn)
-    #TODO: Make use of boolean mask in the original code. Here we only need to sum up specific rows in a smart way. 
-
-
+    # Calculate how much we trust this expert (using corrected Mahalanobis logic)
+    trust_weight = compute_trust_weight(expert_scores, score_range, correlation_matrix)
     
+    # Generate the Copula distribution for the Expert
+    P_expert_tensor = generate_copula_probability_tensor(
+        scores=expert_scores,
+        certainties=expert_certainties,
+        score_range=score_range,
+        sigma_multiplier=sigma_multiplier,
+        correlation_matrix=correlation_matrix
+    )
+    
+    # Apply the exact FPD fractional update rule: V = n + W_i * P_{E_i}
+    updated_memory = memory_tensor + (trust_weight * P_expert_tensor)
+    
+    return updated_memory
+
+# Posterior on phone brands
+    
+def posterior_on_brands(
+    feature_score_preference: np.ndarray,
+    global_brand_score: np.ndarray, 
+    posterior_feature_tensor: np.ndarray, # Shape: (brands, f1, f2, ..., fn)
+    tolerance_distance: float
+) -> np.ndarray:
+    """
+    Calculates the posterior probability of each brand by summing the discrete 
+    probability mass that strictly falls within the accepted hyper-rectangle.
+    """
+    num_of_brands = posterior_feature_tensor.shape[0]
+    
+    # Calculate the normalized prior on brands P(B)
+    brand_prior = calculate_global_brand_preference(global_brand_score)
+    brand_posterior = np.zeros(num_of_brands)
+    
+    # Define the strict lower bounds for acceptance (ensure it doesn't drop below index 0)
+    # Note: We subtract 1 because a score of '7' lives at index 6.
+    thresholds = np.floor(feature_score_preference - tolerance_distance).astype(int)
+    lower_bound_indices = np.maximum(thresholds - 1, 0)
+    
+    # Create the N-Dimensional slice object dynamically
+    # For a 4D feature space with thresholds [7, 5, 8, 4], this creates:
+    # (slice(6, None), slice(4, None), slice(7, None), slice(3, None))
+    feature_slices = tuple(slice(idx, None) for index, idx in enumerate(lower_bound_indices))
+    
+    # Integrate (sum) the accepted probability mass for each brand
+    for b in range(num_of_brands):
+        # Extract the specific brand's feature tensor
+        brand_tensor = posterior_feature_tensor[b]
+        
+        # Slice out the accepted block and sum the probability mass: P(S \in Accept | B=b)
+        accepted_mass = np.sum(brand_tensor[feature_slices])
+        
+        # Apply Bayes Rule: P(B=b | S \in Accept) \propto P(S \in Accept | B=b) * P(B=b)
+        brand_posterior[b] = accepted_mass * brand_prior[b]
+        
+    # Normalize the final posterior across all brands
+    if np.sum(brand_posterior) > 0:
+        brand_posterior = brand_posterior / np.sum(brand_posterior)
+        
+    return brand_posterior
 
 
-    pass
+
 
     
 
@@ -261,21 +347,6 @@ def posterior_on_brands(feature_score_preference: np.ndarray,
 
 
     
-
-    
-
-# Marginal score distributions on features
-
-#TODO: Find better name for v_max
-def map_score_to_distribution(scores: np.ndarray, certainty_vec: np.ndarray, score_range: np.integer, v_max: np.integer):
-    """
-    #TODO: Add description
-    """
-    normalised_scores = np.frompyfunc(normalise_score, 2, 1)(scores, score_range)
-
-    parametrise_beta_dist(normalised_scores, certainty_vec, v_max)
-
-
 
 
 

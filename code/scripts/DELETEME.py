@@ -45,24 +45,33 @@ b = [4, 5, 6]
 
 # print(f"Copula Probability Mass: {prob}")
 
-from itertools import product
+# from itertools import product
 
-score_range = 10
+# score_range = 10
 
-possible_scores = np.arange(1,score_range+1,1)
+# possible_scores = np.arange(1,score_range+1,1)
 
-possible_permutations = np.array(list(product(possible_scores, repeat=3)))
+# possible_permutations = np.array(list(product(possible_scores, repeat=3)))
 
-print(possible_permutations)
+# print(possible_permutations)
 
-print(possible_permutations.shape)
+# print(possible_permutations.shape)
 
-# Filtering scores which have score for 3 feature >= 9
+# # Filtering scores which have score for 3 feature >= 9
 
-bool_mask = np.zeros_like(possible_permutations, dtype=bool)
-possible_permutations
+# bool_mask = np.zeros_like(possible_permutations, dtype=bool)
+# possible_permutations
 
-subset_0 = 
+A = [[1, 2], [3, 4], [5,6]]
+B = [[6, 2], [4, 5], [1,2]]
+
+C = zip(A,B)
+
+print(A)
+print(B)
+
+print(list(C))
+
 
 
 
