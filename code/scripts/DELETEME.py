@@ -62,7 +62,7 @@ b = [4, 5, 6]
 # bool_mask = np.zeros_like(possible_permutations, dtype=bool)
 # possible_permutations
 
-A = [[1, 2], [3, 4], [5,6]]
+A = [[2], [3, 4], [5,6]]
 B = [[6, 2], [4, 5], [1,2]]
 
 C = zip(A,B)

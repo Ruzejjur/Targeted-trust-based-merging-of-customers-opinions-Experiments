@@ -1,12 +1,12 @@
-name: TMoCOBoT
+name: Opinion_merge_v2
 channels:
   - conda-forge
 dependencies:
   - python
-  - jupyter
+  - ipykernel
   - numpy
-  - matplotlib
   - pandas
-  - ipdb
-  - nbdime
-prefix: /opt/homebrew/Caskroom/miniforge/base/envs/TMoCOBoT
+  - matplotlib
+  - scipy
+  - statsmodels
+prefix: /opt/homebrew/Caskroom/miniforge/base/envs/Opinion_merge_v2
