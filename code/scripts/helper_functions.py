@@ -8,6 +8,12 @@ import os
 # Pandas: Data manipulation and analysis
 import pandas as pd
 
+import logging
+import sys
+from pathlib import Path
+
+
+
 def plot_posterior_distribution(variable_names, data, y_label, title, save_path, x_tick_labelsize=17, figsize=(7, 5)):
     """
     Plots and saves a bar chart of a posterior distribution.
@@ -69,3 +75,52 @@ def format_and_display_percentages(data, column_names, header_text, decimal_plac
     # In environments like scripts, returning the DataFrame is more standard
     # than relying on implicit display.
     return posterior_df
+
+def setup_logging(run_directory: Path):
+    """Configures the application's root logger for the parallel runner.
+
+    This function sets up a clean, dual-output logging system for the main
+    execution script. A critical action it performs is to **clear any
+    existing handlers** attached to the root logger. This is essential to
+    prevent duplicate log output that can occur in environments where the
+    logging system may have been previously configured (e.g., in a Jupyter notebook).
+
+    After clearing, it adds two new handlers:
+    1.  A `StreamHandler` to direct logs to the console (`sys.stdout`).
+    2.  A `FileHandler` to save logs to a file named `parallel_runner.log`
+        within the specified `run_directory`.
+
+    Args:
+        run_directory: The unique top-level directory for the entire
+            parallel run, where the `parallel_runner.log` file will be saved.
+
+    Side Effects:
+        - Modifies the global root logger (`logging.getLogger()`) in-place.
+        - Clears all pre-existing handlers from the root logger.
+        - Creates the `run_directory` on the filesystem if it does not exist.
+        - Creates and writes to the `parallel_runner.log` file.
+    """
+    # Define the log file path.
+    log_file = run_directory / "experiment.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Get the root logger.
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO) # Set the minimum level of messages to handle.
+
+    # Clear any existing handlers to avoid duplicate logs.
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    # Create a formatter to define the log message format.
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Create a handler to write to the console (stdout).
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # Create a handler to write to the log file.
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)

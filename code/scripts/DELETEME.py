@@ -4,6 +4,7 @@ from statsmodels.stats.correlation_tools import corr_nearest
 from scipy.stats import norm, beta, multivariate_normal
 from scipy.spatial.distance import mahalanobis
 import time
+import os
 
 # score_range = 10
 # alpha_dist = 6.5
@@ -62,15 +63,23 @@ b = [4, 5, 6]
 # bool_mask = np.zeros_like(possible_permutations, dtype=bool)
 # possible_permutations
 
-A = [[2], [3, 4], [5,6]]
-B = [[6, 2], [4, 5], [1,2]]
+# A = [[2], [3, 4], [5,6]]
+# B = [[6, 2], [4, 5], [1,2]]
 
-C = zip(A,B)
+# C = zip(A,B)
 
-print(A)
-print(B)
+# print(A)
+# print(B)
 
-print(list(C))
+# print(list(C))
+
+run_data = {
+    "Model": test_modes[i]["name"], 
+    "Delta": delta,
+    "Oracle_Winner": true_best_phone,
+    "Model_Winner": model_winner,
+    "Accuracy": accuracy
+}
 
 
 

@@ -3,6 +3,8 @@
 *.csv
 *.png
 *.eps
+*results/
+*/DELETEME.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -122,3 +124,5 @@ dmypy.json
 .pyre/
 
 code/scripts/.DS_Store
+code/scripts/DELETEME.py
+code/scripts/DELETEME.py

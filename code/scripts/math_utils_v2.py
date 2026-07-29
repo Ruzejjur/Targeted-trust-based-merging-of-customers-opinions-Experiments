@@ -190,7 +190,7 @@ def generate_copula_probability_tensor(
     flat_upper = np.stack(grid_upper, axis=-1).reshape(-1, num_features)
     
     # Evaluate the Copula
-    mvn_dist = multivariate_normal(mean=np.zeros(num_features), cov=correlation_matrix)
+    mvn_dist = multivariate_normal(mean=np.zeros(num_features), cov=correlation_matrix) # type: ignore (for false positive Pylance detection)
     
     prob_mass_flat = np.array([
         mvn_dist.cdf(x=upper, lower_limit=lower)
@@ -199,6 +199,68 @@ def generate_copula_probability_tensor(
     
     # Reshape back into the discrete N-Dimensional tensor
     tensor_shape = tuple([score_range] * num_features)
+    P_copula_tensor = prob_mass_flat.reshape(tensor_shape)
+    
+    return P_copula_tensor
+
+def generate_monte_carlo_copula_probability_tensor(
+    scores: np.ndarray, 
+    certainties: np.ndarray, 
+    score_range: int, 
+    sigma_multiplier: float, 
+    correlation_matrix: np.ndarray,
+    num_samples: int = 500000  # Number of Monte Carlo draws for the approximation
+) -> np.ndarray:
+    """
+    Generates the N-dimensional joint probability tensor using a highly optimized 
+    Monte Carlo sampling approach, bypassing the slow SciPy CDF integration loop.
+    """
+    num_features = len(scores)
+    
+    # Generate massive block of correlated samples from the Latent Space
+    # Shape: (num_samples, num_features)
+    latent_samples = np.random.multivariate_normal(
+        mean=np.zeros(num_features), 
+        cov=correlation_matrix, 
+        size=num_samples
+    )
+    
+    # Convert Latent Gaussian samples to Uniform [0, 1] marginals (The Copula Step)
+    uniform_samples = norm.cdf(latent_samples)
+    
+    # Create an empty array to hold the mapped discrete scores
+    discrete_scores = np.zeros_like(uniform_samples, dtype=int)
+    
+    # Map the Uniform samples into the Expert's specific Beta Distributions
+    variance_cap = v_max(score_range, sigma_multiplier)
+    allowed_max_certainty = maximum_certainty(variance_cap)
+    
+    for j in range(num_features):
+        norm_score = normalise_score(scores[j], score_range)
+        safe_certainty = min(certainties[j], allowed_max_certainty)
+        alpha_param, beta_param = parametrise_beta_dist(norm_score, safe_certainty)
+        
+        # We use the Inverse Beta (ppf) to map the uniform Copula structure 
+        # directly onto the expert's subjective feature distribution.
+        # This converts the [0, 1] uniform values into [0, 1] Beta values.
+        beta_samples = beta.ppf(uniform_samples[:, j], alpha_param, beta_param)
+        
+        # Quantize the continuous Beta values into discrete bins (1 to score_range)
+        # e.g., a beta value of 0.85 on a 10-pt scale becomes score 9.
+        discrete_bins = np.floor(beta_samples * score_range).astype(int)
+        discrete_scores[:, j] = np.clip(discrete_bins, 0, score_range - 1)
+        
+    # Count the frequencies of every N-Dimensional state combination
+    # We flatten the multi-dimensional coordinates into a single 1D index array 
+    # using ravel_multi_index so NumPy can count them instantly in C.
+    tensor_shape = tuple([score_range] * num_features)
+    flat_indices = np.ravel_multi_index(discrete_scores.T, tensor_shape)
+    
+    # Count occurrences
+    counts = np.bincount(flat_indices, minlength=np.prod(tensor_shape))
+    
+    # Convert counts to probability mass and reshape back to N-Dimensions
+    prob_mass_flat = counts / num_samples
     P_copula_tensor = prob_mass_flat.reshape(tensor_shape)
     
     return P_copula_tensor
@@ -223,7 +285,8 @@ def initialize_fpd_prior(
     N_max: float, 
     global_certainty: float,
     confidence_ratio: float,
-    sigma_multiplier: float
+    sigma_multiplier: float,
+    approximate_copula: bool = False
 ) -> np.ndarray:
     """
     Constructs the N-dimensional discrete prior tensor based on the primary modeller's 
@@ -245,14 +308,24 @@ def initialize_fpd_prior(
     global_certainty = K*(global_certainty/(1-global_certainty))
 
     # Generate the Copula distribution for the Modeller
-    P_copula_tensor = generate_copula_probability_tensor(
-        scores=modeller_scores,
-        certainties=modeller_certainties,
-        score_range=score_range,
-        sigma_multiplier=sigma_multiplier,
-        correlation_matrix=correlation_matrix
-    )
-        
+
+    if approximate_copula is False:
+        P_copula_tensor = generate_copula_probability_tensor(
+            scores=modeller_scores,
+            certainties=modeller_certainties,
+            score_range=score_range,
+            sigma_multiplier=sigma_multiplier,
+            correlation_matrix=correlation_matrix
+        )
+    else: 
+        P_copula_tensor = generate_monte_carlo_copula_probability_tensor(
+            scores=modeller_scores,
+            certainties=modeller_certainties,
+            score_range=score_range,
+            sigma_multiplier=sigma_multiplier,
+            correlation_matrix=correlation_matrix
+        )
+
     fpd_prior_tensor = 1e-6 + (global_certainty * P_copula_tensor)
     
     return fpd_prior_tensor
