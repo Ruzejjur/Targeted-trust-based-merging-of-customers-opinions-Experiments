@@ -20,6 +20,63 @@ from custom_tqdm import tqdm, logging_redirect_tqdm
 
 from helper_functions import setup_logging
 
+def generate_hidden_user_profile(num_features: int, score_range: int):
+    """
+    Generates the absolute truth of what the simulated user wants.
+    The FPD agent MUST NOT see these values.
+    """
+    # 1. Hidden Target (r_true)
+    r_true = np.random.randint(1, score_range + 1, size=num_features)
+    
+    # 2. Hidden Strictness (a_hidden) - Uniform between 0.5 (flexible) and 5.0 (dealbreaker)
+    a_hidden = np.random.uniform(0.5, 5.0, size=num_features)
+    
+    # 3. Hidden Weights (w_hidden) - Must sum to 1.0 using a flat Dirichlet distribution
+    w_hidden = np.random.dirichlet(np.ones(num_features))
+    
+    return r_true, a_hidden, w_hidden
+
+def corrupt_target_profile(r_true: np.ndarray, score_range: int):
+    """
+    Simulates bounded rationality by adding cognitive noise to the hidden target.
+    This produces the f_target that the FPD agent actually receives.
+    """
+    noise = np.random.normal(loc=0.0, scale=1.0, size=len(r_true))
+    f_target = np.round(r_true + noise).astype(int)
+    
+    # Clamp to ensure the noise doesn't push the score out of the bounds
+    f_target = np.clip(f_target, 1, score_range)
+    return f_target
+
+def calculate_hidden_oracle_winner(
+    ground_truths: dict[str, np.ndarray], 
+    r_true: np.ndarray,
+    a_hidden: np.ndarray,
+    w_hidden: np.ndarray
+) -> str:
+    """
+    The Oracle uses the continuous Sigmoid Utility function to evaluate the 
+    true physical scores against the user's hidden continuous reality.
+    """
+    best_brand = None
+    best_utility = -1.0
+    
+    for brand, true_scores in ground_truths.items():
+        # U_j(f) = 1 / (1 + e^(-a_j * (f - r_true_j)))
+        # Note: (true_scores - r_true) means exceeding the target yields utility approaching 1.0
+        utilities = 1.0 / (1.0 + np.exp(-a_hidden * (true_scores - r_true)))
+        
+        # Weighted sum of feature utilities
+        total_utility = np.sum(w_hidden * utilities)
+        
+        if total_utility > best_utility:
+            best_utility = total_utility
+            best_brand = brand
+
+    assert best_brand is not None, "Oracle failed to find a winner."
+    return best_brand
+
+
 def generate_monte_carlo_experts(
     brand_name: str, 
     ground_truth_scores: np.ndarray, 
@@ -87,43 +144,18 @@ def generate_monte_carlo_experts(
     np.random.shuffle(expert_feed)
     return list(expert_feed)
 
-def calculate_hidden_oracle_winner(
-    ground_truths: dict[str, np.ndarray], 
-    modeller_preference: np.ndarray
-) -> str:
-    """
-    The Oracle uses continuous Euclidean distance to determine the true best phone.
-    This is completely hidden from the Bayesian FPD models.
-    """
-    best_brand = None
-    best_distance = float('inf')
-    
-    for brand, true_scores in ground_truths.items():
-        # Calculate Euclidean distance between the true phone and the ideal target
-        distance = np.linalg.norm(true_scores - modeller_preference)
-        if distance < best_distance:
-            best_distance = distance
-            best_brand = brand
-
-    assert best_brand is not None, "best_brand cannot be of type None."
-    
-    return best_brand
-
 
 def run_monte_carlo_simulation(results_path: Path) -> None:
     logging.info("Starting Monte Carlo ablation testing...\n")
     start_time = time.time()
     
     # --- Setup Objective Market Reality ---
-    # F1 and F2 are highly positively correlated (e.g., Price and CPU)
     Sigma_Empirical = np.array([
         [1.0, 0.7, 0.3, 0.1],
         [0.7, 1.0, 0.2, 0.1],
         [0.3, 0.2, 1.0, 0.4],
         [0.1, 0.1, 0.4, 1.0]
     ])
-    
-    # The "Original Framework" assumes all features are independent
     Sigma_Independent = np.eye(Sigma_Empirical.shape[0])
     
     # --- Parameterization ---
@@ -133,40 +165,21 @@ def run_monte_carlo_simulation(results_path: Path) -> None:
     GLOBAL_CERTAINTY = 0.5
     CONFIDENCE_RATIO = 10
     APPROXIMATE_COPULA = True
-
-    # Generate NUM_EXPERTS experts for each phone, with a 20% Troll infection rate
     NUM_EXPERTS = 10
     TROLL_RATIO = 0.7
     
-    # The Modeller's minimal preference for scores
-    modeller_target = np.array([8, 8, 7, 7])
+    # NEW: Define the statistical power of your simulation
+    NUM_MC_ITERATIONS = 2
+    NUM_FEATURES = Sigma_Empirical.shape[0]
     
-    # Ground truth setup
-    # Phone Alpha is objectively great (matches target). Phone Beta is objectively mediocre.
     alpha_ground_truth = np.array([9, 8, 8, 7])
     beta_ground_truth  = np.array([5, 5, 6, 6])
     
-    initial_brand_opinions = [
-        # Modeller starts with skeptical/average priors for both
-        {"name": "Brand_0", "scores": np.array([5, 5, 5, 5]), "cert": np.array([0.4]*4), "overal_brand_preference_score": 5},
-        {"name": "Brand_1",  "scores": np.array([5, 5, 5, 5]), "cert": np.array([0.4]*4), "overal_brand_preference_score": 5}
-    ]
-
     hidden_ground_truths = {
         "Brand_0": alpha_ground_truth,
         "Brand_1": beta_ground_truth
     }
     
-    # The Oracle calculates the absolute best phone
-    true_best_phone = calculate_hidden_oracle_winner(hidden_ground_truths, modeller_target)
-    logging.info(f"ORACLE: The objectively best phone for the user is {true_best_phone}\n")
-    
-
-    
-    expert_feed = generate_monte_carlo_experts("Brand_0", alpha_ground_truth, NUM_EXPERTS, TROLL_RATIO, SCORE_RANGE)
-    expert_feed += generate_monte_carlo_experts("Brand_1", beta_ground_truth, NUM_EXPERTS, TROLL_RATIO, SCORE_RANGE)
-    
-    # --- The 3-Tiered Ablation Test ---
     test_modes = [
         {"name": "Model A (FPD Copula)", "sigma": Sigma_Empirical, "disable_trust": False},
         {"name": "Model B (Original Independent FPD)", "sigma": Sigma_Independent, "disable_trust": False},
@@ -179,65 +192,79 @@ def run_monte_carlo_simulation(results_path: Path) -> None:
     context_manager = logging_redirect_tqdm()
 
     with context_manager:
-        for i in tqdm(range(len(test_modes)), desc="Test mode"):
-            logging.info(f"\n Executing {test_modes[i]['name']}...")
+        # THE MONTE CARLO LOOP
+        for mc in tqdm(range(NUM_MC_ITERATIONS), desc="Monte Carlo Iterations"):
             
-            # Spin up clean nodes
-            nodes = []
-            for bp in initial_brand_opinions:
-                node = BrandFPDNode(
-                    brand_name=bp["name"], modeller_scores=bp["scores"], 
-                    modeller_certainties=bp["cert"], score_range=SCORE_RANGE, 
-                    correlation_matrix=test_modes[i]["sigma"], N_max=N_MAX, 
-                    confidence_ratio = CONFIDENCE_RATIO,
-                    global_certainty=GLOBAL_CERTAINTY, sigma_multiplier=SIGMA_MULTIPLIER,
-                    approximate_copula = APPROXIMATE_COPULA
-                )
-                nodes.append(node)
-                
-            market = PosteriorEvaluator(nodes, np.array([bp["overal_brand_preference_score"] for bp in initial_brand_opinions]))
+            # 1. Generate the Objective Truth of the User
+            r_true, a_hidden, w_hidden = generate_hidden_user_profile(NUM_FEATURES, SCORE_RANGE)
             
-            # Feed the Experts sequentially
+            # 2. Corrupt the truth to simulate bounded articulation
+            f_target_corrupted = corrupt_target_profile(r_true, SCORE_RANGE)
+            
+            # 3. The Oracle grades physical reality against hidden continuous desires
+            true_best_phone = calculate_hidden_oracle_winner(
+                hidden_ground_truths, r_true, a_hidden, w_hidden
+            )
+            
+            # 4. Generate the stochastic experts for this specific run
+            expert_feed = generate_monte_carlo_experts("Brand_0", alpha_ground_truth, NUM_EXPERTS, TROLL_RATIO, SCORE_RANGE)
+            expert_feed += generate_monte_carlo_experts("Brand_1", beta_ground_truth, NUM_EXPERTS, TROLL_RATIO, SCORE_RANGE)
+            
+            # 5. Execute the Models
+            for i in range(len(test_modes)):
+                nodes = []
+                for brand_name in ["Brand_0", "Brand_1"]:
+                    node = BrandFPDNode(
+                        brand_name=brand_name, 
+                        modeller_scores=np.array([5]*NUM_FEATURES), # Weak uninformative start 
+                        modeller_certainties=np.array([0.4]*NUM_FEATURES), 
+                        score_range=SCORE_RANGE, 
+                        correlation_matrix=test_modes[i]["sigma"], 
+                        N_max=N_MAX, 
+                        confidence_ratio=CONFIDENCE_RATIO,
+                        global_certainty=GLOBAL_CERTAINTY, 
+                        sigma_multiplier=SIGMA_MULTIPLIER,
+                        approximate_copula=APPROXIMATE_COPULA
+                    )
+                    nodes.append(node)
+                    
+                market = PosteriorEvaluator(nodes, np.array([5, 5])) # Neutral brand preference
+                
+                # Feed the Experts
+                for e in expert_feed:
+                    target_node = next(n for n in nodes if n.brand_name == e["brand"])
+                    target_node.apply_expert_update(
+                        expert_scores=e["scores"], 
+                        expert_certainties=e["cert"],
+                        sigma_multiplier=SIGMA_MULTIPLIER, 
+                        correlation_matrix=test_modes[i]["sigma"],
+                        disable_trust=test_modes[i]["disable_trust"] 
+                    )
+                    
+                # Evaluate Results using the CORRUPTED target, not the hidden truth
+                for delta in delta_budgets:
+                    posteriors = market.calculate_posteriors(f_target_corrupted, delta)
+                    
+                    model_winner = max(posteriors, key=lambda k: posteriors[k])
+                    accuracy = 1 if model_winner == true_best_phone else 0
+                    
+                    run_data = {
+                        "MC_Iteration": mc,
+                        "Model": test_modes[i]["name"], 
+                        "Delta": delta,
+                        "Oracle_Winner": true_best_phone,
+                        "Model_Winner": model_winner,
+                        "Accuracy": accuracy
+                    }
+                    run_data.update(posteriors)
+                    results.append(run_data)
 
-            for e in tqdm(range(len(expert_feed))):
-                target_node = next(n for n in nodes if n.brand_name == expert_feed[e]["brand"])
-                target_node.apply_expert_update(
-                    expert_scores=expert_feed[e]["scores"], 
-                    expert_certainties=expert_feed[e]["cert"],
-                    sigma_multiplier=SIGMA_MULTIPLIER, 
-                    correlation_matrix=test_modes[i]["sigma"],
-                    disable_trust=test_modes[i]["disable_trust"] 
-                )
-                
-            # Evaluate Results
-            for delta in delta_budgets:
-                posteriors = market.calculate_posteriors(modeller_target, delta)
-                
-                # Determine which phone the Bayesian Model selected
-                model_winner = max(posteriors, key=lambda k: posteriors[k])
-                
-                # Did the model successfully recover the true utility?
-                accuracy = 1 if model_winner == true_best_phone else 0
-                
-                run_data = {
-                    "Model": test_modes[i]["name"], 
-                    "Delta": delta,
-                    "Oracle_Winner": true_best_phone,
-                    "Model_Winner": model_winner,
-                    "Accuracy": accuracy
-                }
-                # Append the raw probabilities as well
-                run_data.update(posteriors)
-                results.append(run_data)
-
-# Export
+    # Export Logic remains the same...
     df = pd.DataFrame(results)
-    
-    # Generate Timestamp and Directory
     os.makedirs(results_path, exist_ok=True)
     
-    # Package the Hyperparameters
     experiment_params = {
+        "NUM_MC_ITERATIONS": NUM_MC_ITERATIONS,
         "SCORE_RANGE": SCORE_RANGE,
         "N_MAX": float(N_MAX),
         "SIGMA_MULTIPLIER": float(SIGMA_MULTIPLIER),
@@ -246,21 +273,17 @@ def run_monte_carlo_simulation(results_path: Path) -> None:
         "APPROXIMATE_COPULA": APPROXIMATE_COPULA,
         "NUM_EXPERTS": NUM_EXPERTS,
         "TROLL_RATIO": float(TROLL_RATIO),
-        "modeller_target": modeller_target.tolist(), # Convert numpy array to list for clean YAML
         "delta_budgets": delta_budgets
     }
     
-    # Save Parameters to YAML
     yaml_path = results_path / "parameters.yaml"
     with open(yaml_path, "w") as yaml_file:
         yaml.dump(experiment_params, yaml_file, default_flow_style=False, sort_keys=False)
     
-    # Save Results to CSV
     csv_path = results_path / "monte_carlo_ablation_results.csv"
     df.to_csv(csv_path, index=False)
     
     logging.info(f"\nSimulation complete in {time.time() - start_time:.2f} seconds.")
-    logging.info(f"Results and parameters saved to directory: '{results_path}/'")
 
 if __name__ == "__main__":
 
